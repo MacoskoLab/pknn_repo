@@ -553,7 +553,7 @@ def predict_individual_cell_ensemble_models(cell_name, predicted_cell_type,
 
 
 
-def run_knn_ensemble_comparisons_parallel(cell_type_comparisons, model_path, query_obj, n_cores = 30, models_are_folder_chunked=False):
+def run_knn_ensemble_comparisons_parallel(cell_type_comparisons, model_path, query_obj, n_cores = 30, models_are_folder_chunked=True):
     assert len(list(cell_type_comparisons.keys())) == query_obj.shape[0]
 
     cell_names = list(query_obj.obs.index)
@@ -600,7 +600,7 @@ def identify_failed_cell_type_comparisons(knn_ensemble_results):
     
 
 
-def run_knn_ensemble_comparisons_from_cell_type_comparisons(cell_type_comparisons_failed,  query_obj, model_path, n_cores = 30, models_are_folder_chunked=False):
+def run_knn_ensemble_comparisons_from_cell_type_comparisons(cell_type_comparisons_failed,  query_obj, model_path, n_cores = 30, models_are_folder_chunked=True):
 # construct arguments
     gene_label_vector = query_obj.var.index
     n_cell_type_comparisons_needed = len(cell_type_comparisons_failed)

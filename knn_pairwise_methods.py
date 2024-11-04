@@ -106,7 +106,7 @@ def parse_combined_results_obj(combined_obj):
     return cellular_results, pred_df
 
 
-def preform_pairwise_knn_prediction( model_path, n_neighbors_h0, query_obj, ref_obj = None, combined_obj = None, n_next_cell_types_compare = None, n_cores = 30, embed_key="X_pca", ref_ct_label = "ClusterNm", models_are_folder_chunked=False):
+def preform_pairwise_knn_prediction( model_path, n_neighbors_h0, query_obj, ref_obj = None, combined_obj = None, n_next_cell_types_compare = None, n_cores = 30, embed_key="X_pca", ref_ct_label = "ClusterNm", models_are_folder_chunked=True):
 
     assert query_obj is not None, "query_obj must be provided"
 
