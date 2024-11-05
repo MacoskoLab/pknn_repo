@@ -1,0 +1,6 @@
+{
+    "whole_reference_path": "/Volumes/broad_macosko/jsilverm/pknn_repo/small_macosko_ref.h5ad",
+    "cell_type_col": "ClusterNm",
+    "n_genes_directional": 50,
+    "n_cells_per_chunked_obj": 200
+}
