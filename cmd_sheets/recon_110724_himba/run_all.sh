@@ -1,0 +1,1 @@
+sbatch --mem=300 --cpus-per-task=15 --time=1-0 /broad/macosko/jsilverm/pknn_repo/cmd_sheets/recon_110724_himba/himba_balanced.sh
