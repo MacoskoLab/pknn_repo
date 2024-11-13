@@ -10,6 +10,15 @@ import pickle
 sys.path.append('/broad/macosko/jsilverm/pknn_repo/')
 import pairwise_functions as pf
 
+def get_all_files(directory):
+    files_list = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            # Get full path
+            
+            # full_path = os.path.join(root, file)
+            files_list.append(file)
+    return files_list
 
 # Load data
 parser = argparse.ArgumentParser()
@@ -26,6 +35,11 @@ general_working_dir = specs.get('general_working_dir', None)
 n_genes_directional_compute = specs.get('n_genes_directional_compute', None)
 n_cores = specs.get('n_cores', None)
 marker_comp_method = specs.get('marker_comp_method', None)
+donor_col = specs.get('donor_col', None)
+if donor_col is not None:
+    is_donor_chunked=True
+else:
+    is_donor_chunked = False
 
 assert chunked_reference_out_path is not None, 'chunked_reference_out_path is required'
 assert markers_reference_out_path is not None, 'markers_reference_out_path is required'
@@ -53,12 +67,14 @@ if marker_computation:
 
 
 
-
-
 os.makedirs(markers_reference_out_path, exist_ok=True)
 
-chunked_objs_present = os.listdir(chunked_reference_out_path)
-cell_types_present = [fname.split(".h5ad")[0] for fname in chunked_objs_present]
+if is_donor_chunked:
+    all_terminal_files = get_all_files(chunked_reference_out_path)
+    cell_types_present = list(set([fname.split(".h5ad")[0] for fname in all_terminal_files if ".h5ad" in fname]))
+else:
+    chunked_objs_present = os.listdir(chunked_reference_out_path)
+    cell_types_present = [fname.split(".h5ad")[0] for fname in chunked_objs_present if ".h5ad" in fname]
 
 #### For himba benchmarking ####
 valid_markers_path = "/broad/macosko/jsilverm/pknn_cell_type_preds/shared_features.pkl"
@@ -67,7 +83,7 @@ valid_markers_set = pickle.load(open(valid_markers_path, "rb"))
 de_args = []
 for inx_1, ct_name_1 in enumerate(cell_types_present):
     cell_type_2_lis = cell_types_present[inx_1 + 1:]
-    arg = (chunked_reference_out_path, ct_name_1, cell_type_2_lis, n_genes_directional_compute, markers_reference_out_path, marker_comp_method, valid_markers_set)
+    arg = (chunked_reference_out_path, ct_name_1, cell_type_2_lis, n_genes_directional_compute, markers_reference_out_path, marker_comp_method, valid_markers_set, is_donor_chunked)
     de_args.append(arg)
 
 pool = mp.Pool(n_cores)

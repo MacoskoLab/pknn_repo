@@ -88,6 +88,100 @@ def compute_balanced_mean_markers(cell_type_1_adata, cell_type_2_adata, n_genes_
     group_2_markers = pd.Series(np.arange(len(cell_type_2_markers)), index=cell_type_2_markers)
     return group_1_markers, group_2_markers
 
+def compute_gene_rankings_nonzero(cell_type_1_adata, cell_type_2_adata):
+    assert np.all(cell_type_1_adata.var_names == cell_type_2_adata.var_names)
+    gene_names = cell_type_1_adata.var_names
+    cell_type_1_values_series = pd.Series(np.array(np.mean(cell_type_1_adata.X > 0, axis=0)).flatten(), index=gene_names)
+    cell_type_2_values_series = pd.Series(np.array(np.mean(cell_type_2_adata.X > 0, axis=0)).flatten(), index=gene_names)
+
+    cell_type_1_diff_2 = cell_type_1_values_series - cell_type_2_values_series
+    cell_type_1_diff_2_sorted = pd.DataFrame(cell_type_1_diff_2.sort_values(ascending=False), columns=["score"])
+    cell_type_1_diff_2_sorted["gene"] = cell_type_1_diff_2_sorted.index
+    cell_type_1_diff_2_sorted["ranking"] = np.arange(0, cell_type_1_diff_2_sorted.shape[0])
+    cell_type_1_diff_2_sorted = cell_type_1_diff_2_sorted.reset_index(drop=True)
+
+    cell_type_2_diff_1 = cell_type_2_values_series - cell_type_1_values_series
+    cell_type_2_diff_1_sorted = pd.DataFrame(cell_type_2_diff_1.sort_values(ascending=False), columns=["score"])
+    cell_type_2_diff_1_sorted["gene"] = cell_type_2_diff_1.index
+    cell_type_2_diff_1_sorted["ranking"] = np.arange(0, cell_type_2_diff_1_sorted.shape[0])
+    cell_type_2_diff_1_sorted = cell_type_2_diff_1_sorted.reset_index(drop=True)
+
+    res = {"cell_type_1": cell_type_1_diff_2_sorted, "cell_type_2": cell_type_2_diff_1_sorted}
+    
+    return res
+
+
+
+def compute_and_save_markers_donor_chunked(base_chunked_dir, cell_type_1, cell_type_2, out_dir_base, marker_comp_method="nonzero", valid_markers_set=None, donor_consensus_method="max"):
+    assert marker_comp_method in ["nonzero"], f"{marker_comp_method} not valid"
+    assert donor_consensus_method in ["max", "mean"], f"{donor_consensus_method} not valid"
+
+    print("identifying valid donors")
+    # Read in all donor split cell type objects
+    donor_dirs_present = os.listdir(base_chunked_dir)
+    
+    possible_cell_type_1_paths = [os.path.join(base_chunked_dir, donor_dir, f"{cell_type_1}.h5ad") for donor_dir in donor_dirs_present]
+    cell_type_1_paths = [ct_1_path for ct_1_path in possible_cell_type_1_paths if os.path.exists(ct_1_path)]
+    assert len(cell_type_1_paths) != 0, f"No paths found for {cell_type_1}"
+    
+    possible_cell_type_2_paths = [os.path.join(base_chunked_dir, donor_dir, f"{cell_type_2}.h5ad") for donor_dir in donor_dirs_present]
+    cell_type_2_paths = [ct_2_path for ct_2_path in possible_cell_type_2_paths if os.path.exists(ct_2_path)]
+    assert len(cell_type_2_paths) != 0, f"No paths found for {cell_type_2}"
+    
+    print("reading in objects")
+    cell_type_1_objs = {}
+    for cell_type_1_path in cell_type_1_paths:
+        donor = cell_type_1_path.split("/")[-2]
+        obj = ad.read_h5ad(cell_type_1_path)
+
+        if valid_markers_set is not None:
+            is_valid_gene = obj.var_names.isin(valid_markers_set)
+            obj = obj[:,is_valid_gene]
+        cell_type_1_objs[donor] = obj.copy()
+    
+    cell_type_2_objs = {}
+    for cell_type_2_path in cell_type_2_paths:
+        donor = cell_type_2_path.split("/")[-2]
+        obj = ad.read_h5ad(cell_type_2_path)
+        if valid_markers_set is not None:
+            is_valid_gene = obj.var_names.isin(valid_markers_set)
+            obj = obj[:,is_valid_gene]
+        cell_type_2_objs[donor] = obj.copy()
+
+    print("computing rankings")
+    ct_1_rankings = []
+    ct_2_rankings = []
+    
+    for ct1_inx, (cell_type_1_donor, ct_1_obj) in enumerate(cell_type_1_objs.items()):
+        for ct2_inx, (cell_type_2_donor, ct_2_obj) in enumerate(cell_type_2_objs.items()):
+            rankings = compute_gene_rankings_nonzero(ct_1_obj, ct_2_obj)
+            ct_1_current_df = rankings["cell_type_1"]
+            ct_1_current_df["cell_type_1_donor"] = cell_type_1_donor
+            ct_1_current_df["cell_type_2_donor"] = cell_type_2_donor
+            ct_1_rankings.append(ct_1_current_df)
+            
+            ct_2_current_df = rankings["cell_type_2"]
+            ct_2_current_df["cell_type_1_donor"] = cell_type_1_donor
+            ct_2_current_df["cell_type_2_donor"] = cell_type_2_donor
+            ct_2_rankings.append(ct_2_current_df)
+    
+    ct_1_concat = pd.concat(ct_1_rankings).reset_index(drop=True)
+    ct_2_concat = pd.concat(ct_2_rankings).reset_index(drop=True)
+
+    print("aggregating rankings")
+    # hardcoded savings of 1k genes
+    if donor_consensus_method == "max":
+        ct_1_rankings = ct_1_concat.groupby("gene")["ranking"].max().sort_values().iloc[:1000]
+        ct_2_rankings = ct_2_concat.groupby("gene")["ranking"].max().sort_values().iloc[:1000]
+    elif donor_consensus_method == "mean":
+        ct_1_rankings = ct_1_concat.groupby("gene")["ranking"].mean().sort_values().iloc[:1000]
+        ct_2_rankings = ct_2_concat.groupby("gene")["ranking"].mean().sort_values().iloc[:1000]
+    
+    res = {cell_type_1: ct_1_rankings, cell_type_2: ct_2_rankings}
+    
+    save_pairwise_model(cell_type_1, cell_type_2, out_dir_base, res, "markers")
+    gc.collect()
+
 
 
 def compute_and_save_markers(base_chunked_dir, cell_type_1, cell_type_2, n_genes, out_dir_base, marker_comp_method="nonzero", valid_markers_set=None):
@@ -137,12 +231,17 @@ def compute_and_save_markers(base_chunked_dir, cell_type_1, cell_type_2, n_genes
     save_pairwise_model(cell_type_1, cell_type_2, out_dir_base, res, "markers")
 
 
-def compute_markers_cell_type_to_all(chunked_ref_base, cell_type_1, cell_type_2_lis, n_markers_dir, markers_out_path_full, marker_comp_method, valid_markers_set=None):
+def compute_markers_cell_type_to_all(chunked_ref_base, cell_type_1, cell_type_2_lis, n_markers_dir, markers_out_path_full, marker_comp_method, valid_markers_set=None, is_donor_chunked=False):
     valid_marker_methods = ["nonzero", "mean", "balanced_mean"]
     if marker_comp_method not in valid_marker_methods:
         raise Exception(f"marker_comp_method: {marker_comp_method} is not in valid methods: {valid_marker_methods}")
+    
     for cell_type_2 in cell_type_2_lis:
-        compute_and_save_markers(chunked_ref_base, cell_type_1, cell_type_2, n_markers_dir, markers_out_path_full, marker_comp_method, valid_markers_set)
+        if is_donor_chunked:
+            print("using donor chunked")
+            compute_and_save_markers_donor_chunked(chunked_ref_base, cell_type_1, cell_type_2, markers_out_path_full, marker_comp_method, valid_markers_set, "max")
+        else:    
+            compute_and_save_markers(chunked_ref_base, cell_type_1, cell_type_2, n_markers_dir, markers_out_path_full, marker_comp_method, valid_markers_set)
     
 
 def read_in_sorted_subfolder_obj( group1, group2, base_path, suffix=None, sort_alphabetically=True):
@@ -176,7 +275,7 @@ def get_markers_chunked(cell_type_1, cell_type_2, markers_base, suffix=None):
     return combined_markers
 
 
-def create_classifier_set(inx, current_cell_type, compare_cell_types, chunked_reference_base, markers_base, base_classifier_path, n_features_directional=25, cell_per_type=200, equal_size_n=False):
+def create_classifier_set(inx, current_cell_type, compare_cell_types, chunked_reference_base, markers_base, base_classifier_path, n_features_directional=25, cell_per_type=200, equal_size_n=False, classifier_name="knn"):
     print(current_cell_type)
     f_name="classifier"
     if inx % 10 == 0:
@@ -188,18 +287,223 @@ def create_classifier_set(inx, current_cell_type, compare_cell_types, chunked_re
         
         if model_exists:
             continue
-        
-        markers = get_markers_chunked(current_cell_type, cell_type, markers_base=markers_base, suffix="markers")
-                                      
-        classifier = create_classifier_pair(cell_type_1 = current_cell_type, cell_type_2=cell_type, 
-                                            chunked_reference_base=chunked_reference_base, 
-                                            markers=markers,  cell_per_type=cell_per_type, 
-                                            equal_size_n=equal_size_n)
-        
-        res_obj = {"classifier": classifier, "cell_type1": cell_type, "cell_type2": current_cell_type,  "markers": markers}
 
-        # save in indexable system
-        save_pairwise_model(current_cell_type, cell_type, base_classifier_path, res_obj, f_name, order_alphabetically=True)
+        create_paired_classifer_test_n_markers(current_cell_type, cell_type, chunked_reference_base, markers_base, base_classifier_path, cell_per_type=cell_per_type, classifier_name=classifier_name)
+        
+        # markers = get_markers_chunked(current_cell_type, cell_type, markers_base=markers_base, suffix="markers")                              
+        # classifier = create_classifier_pair(cell_type_1 = current_cell_type, cell_type_2=cell_type, 
+        #                                     chunked_reference_base=chunked_reference_base, 
+        #                                     markers=markers,  cell_per_type=cell_per_type, 
+        #                                     equal_size_n=equal_size_n)
+        
+        # res_obj = {"classifier": classifier, "cell_type1": cell_type, "cell_type2": current_cell_type,  "markers": markers}
+
+        # # save in indexable system
+        # save_pairwise_model(current_cell_type, cell_type, base_classifier_path, res_obj, f_name, order_alphabetically=True)
+
+
+def read_in_donor_chunked_objs(base_chunked_dir, cell_type, valid_markers_set=None, normalize=False):
+    donor_dirs_present = os.listdir(base_chunked_dir)
+    possible_cell_type_paths = [os.path.join(base_chunked_dir, donor_dir, f"{cell_type}.h5ad") for donor_dir in donor_dirs_present]
+    cell_type_paths = [ct_path for ct_path in possible_cell_type_paths if os.path.exists(ct_path)]
+    
+    assert len(cell_type_paths) != 0, f"No paths found for {cell_type}"
+
+    print("reading in objects")
+    cell_type_objs = {}
+    for cell_type_path in cell_type_paths:
+        donor = cell_type_path.split("/")[-2]
+        obj = ad.read_h5ad(cell_type_path)
+
+        if valid_markers_set is not None:
+            is_valid_gene = obj.var_names.isin(valid_markers_set)
+            obj = obj[:,is_valid_gene]
+        if normalize:
+            obj.layers["counts"] = obj.X
+            sc.pp.normalize_total(obj, target_sum=1e4)
+            sc.pp.log1p(obj)
+            obj.layers["data"] = obj.X
+            
+        cell_type_objs[donor] = obj
+    return cell_type_objs
+
+
+
+def create_donor_balanced_ref(cell_type_objs, target_size=300, seed=6):
+    np.random.seed(seed)
+    n_donors_total = len(cell_type_objs)
+
+    size_per_donor = [(cell_type_objs[donor_id].shape[0], donor_id) for donor_id in cell_type_objs.keys()]
+
+    size_per_donor = sorted(size_per_donor)
+    n_sample_per_donor = {}
+    n_remaining_to_sample = target_size
+    
+    for donor_inx, (n_per_donor, donor_id) in enumerate(size_per_donor):
+        n_donors_remain = n_donors_total - donor_inx
+        target_donor_size = int(np.ceil(n_remaining_to_sample / n_donors_remain))
+        if n_per_donor <= target_donor_size:
+            n_sample_per_donor[donor_id] = n_per_donor
+            n_remaining_to_sample -= n_per_donor
+        else:
+            n_sample_per_donor[donor_id] = target_donor_size            
+            n_remaining_to_sample -= target_donor_size
+
+    sampled_adata_objs = {}
+    for donor_id, n_to_sample in n_sample_per_donor.items():
+        donor_adata = cell_type_objs[donor_id]
+        sampled_indices = np.random.choice(donor_adata.shape[0], n_to_sample, replace=False)
+        sampled_adata_objs[donor_id] = donor_adata[sampled_indices]
+
+    combined_sampled_obj = ad.concat(sampled_adata_objs, axis=0)
+    
+    return combined_sampled_obj
+
+
+def create_pred_model(cell_type_1, cell_type_2, cell_type_1_adata, cell_type_2_adata, markers, classifier_name="svm"):
+
+    valid_classifiers = ["knn", "svm"]
+    assert classifier_name in valid_classifiers, f"classifier_name must be in {valid_classifiers}"
+
+    cell_type_1_mat_markers_only = cell_type_1_adata[:, markers].X.toarray()
+    cell_type_2_mat_markers_only = cell_type_2_adata[:, markers].X.toarray()
+
+    if classifier_name == "svm":
+        classifier = SVC(
+            kernel='rbf',  # Radial basis function kernel
+            probability=True,  # Enable probability estimates
+            random_state=42,
+            class_weight='balanced'
+        )
+    elif classifier_name == "knn":
+        classifier = KNeighborsClassifier(n_neighbors=12, metric="cosine", weights="distance")
+        
+    # Prepare training labels
+    reference_labels = ([cell_type_1] * cell_type_1_mat_markers_only.shape[0] + 
+                       [cell_type_2] * cell_type_2_mat_markers_only.shape[0])
+    
+    # Combine training data
+    training_data = np.vstack([cell_type_1_mat_markers_only, cell_type_2_mat_markers_only])
+    
+    # Fit the classifier
+    classifier.fit(training_data, reference_labels)
+    
+    res_obj = {"classifier": classifier, "cell_type1": cell_type_1, "cell_type2": cell_type_2,  "markers": markers}
+    return res_obj
+
+def predict_obj_from_classifier_obj(query_obj, query_cell_type, classifier_obj):
+    """Assumes query_obj is normalized"""
+    markers = classifier_obj["markers"]
+    model = classifier_obj["classifier"]
+
+    query_data_mat = query_obj[:,markers].X.toarray()
+
+    class_labels = model.classes_
+    if len(class_labels) != 2:
+        raise ValueError("This function expects a binary classifier")
+         
+    # Get predictions and probabilities
+    predictions = model.predict(query_data_mat)
+    prediction_probs = model.predict_proba(query_data_mat)
+    
+    # Get probability for the positive class (confidence)
+    
+    # Calculate accuracy
+    correct_mask = predictions == query_cell_type
+    accuracy = np.mean(correct_mask)
+    
+    positive_class_idx = np.where(class_labels == query_cell_type)[0][0]
+    negative_class_idx = np.where(class_labels != query_cell_type)[0][0]
+    mean_correct_minus_incorrect_p = np.mean(prediction_probs[:,positive_class_idx] -  prediction_probs[:,negative_class_idx])
+
+    res ={"query_cell_type":query_cell_type, "accuracy": accuracy, "conf_metric": mean_correct_minus_incorrect_p}
+
+    
+    return res
+
+
+def create_paired_classifer_test_n_markers(cell_type_1, cell_type_2, chunked_reference_base, markers_base, base_classifier_path, cell_per_type=300, min_markers=5, max_markers=150, n_jump_markers=5, classifier_name="knn"):
+
+    print(f"Read in {cell_type_1} objs")
+    cell_type_1_objs = read_in_donor_chunked_objs(chunked_reference_base, cell_type_1, normalize=True)
+    print(f"Read in {cell_type_2} objs")
+    cell_type_2_objs = read_in_donor_chunked_objs(chunked_reference_base, cell_type_2, normalize=True)
+    
+    
+    marker_objs =  read_in_sorted_subfolder_obj(cell_type_1, cell_type_2, markers_base, suffix="markers")
+    
+    donors_ct_1 = list(cell_type_1_objs.keys())
+    donors_ct_2 = list(cell_type_2_objs.keys())
+    
+    ct_1_heldout_dict = {"donor_witheld": [], "accuracy": [], "conf_metric": [], "n_genes_ct_1": [], "n_genes_ct_2": []}
+    ct_2_heldout_dict = {"donor_witheld": [], "accuracy": [], "conf_metric": [], "n_genes_ct_1": [], "n_genes_ct_2": []}
+    
+    for n_genes_dir in np.arange(min_markers, max_markers, n_jump_markers):
+        print(n_genes_dir)
+        n_genes_ct1=n_genes_dir
+        n_genes_ct2=n_genes_dir
+    
+        cell_type_1_markers = marker_objs[cell_type_1].sort_values(ascending=True).iloc[:n_genes_ct1]
+        cell_type_2_markers = marker_objs[cell_type_2].sort_values(ascending=True).iloc[:n_genes_ct2]
+        combined_markers_index = cell_type_1_markers.index.append(cell_type_2_markers.index)
+        combined_markers = np.array(combined_markers_index)
+        
+        for inx, ct_1_donor in enumerate(donors_ct_1):
+            query_obj = cell_type_1_objs.pop(ct_1_donor)
+            ct_1_reference = create_donor_balanced_ref(cell_type_1_objs, cell_per_type)
+            ct_2_reference = create_donor_balanced_ref(cell_type_2_objs, cell_per_type)
+        
+            current_classifier_obj = create_pred_model(cell_type_1, cell_type_2, ct_1_reference, ct_2_reference, combined_markers, classifier_name=classifier_name)
+            predictions = predict_obj_from_classifier_obj(query_obj, cell_type_1, current_classifier_obj)
+        
+            ct_1_heldout_dict["donor_witheld"].append(ct_1_donor)
+            ct_1_heldout_dict["accuracy"].append(predictions["accuracy"])
+            ct_1_heldout_dict["conf_metric"].append(predictions["conf_metric"])
+            ct_1_heldout_dict["n_genes_ct_1"].append(n_genes_ct1)
+            ct_1_heldout_dict["n_genes_ct_2"].append(n_genes_ct2)
+        
+            cell_type_1_objs[ct_1_donor] = query_obj
+        
+        for inx, ct_2_donor in enumerate(donors_ct_2):
+            query_obj = cell_type_2_objs.pop(ct_2_donor)
+            ct_1_reference = create_donor_balanced_ref(cell_type_1_objs, cell_per_type)
+            ct_2_reference = create_donor_balanced_ref(cell_type_2_objs, cell_per_type)
+        
+            current_classifier_obj = create_pred_model(cell_type_1, cell_type_2, ct_1_reference, ct_2_reference, combined_markers, classifier_name=classifier_name)
+            predictions = predict_obj_from_classifier_obj(query_obj, cell_type_2, current_classifier_obj)
+        
+            ct_2_heldout_dict["donor_witheld"].append(ct_2_donor)
+            ct_2_heldout_dict["accuracy"].append(predictions["accuracy"])
+            ct_2_heldout_dict["conf_metric"].append(predictions["conf_metric"])
+            ct_2_heldout_dict["n_genes_ct_1"].append(n_genes_ct1)
+            ct_2_heldout_dict["n_genes_ct_2"].append(n_genes_ct2)
+        
+            cell_type_2_objs[ct_2_donor] = query_obj
+    
+    ct_1_heldout_df = pd.DataFrame(ct_1_heldout_dict)
+    ct_2_heldout_df = pd.DataFrame(ct_2_heldout_dict)
+    
+    ct_1_preformance = ct_1_heldout_df.groupby("n_genes_ct_1")["conf_metric"].mean()
+    ct_2_preformance = ct_2_heldout_df.groupby("n_genes_ct_1")["conf_metric"].mean()
+    top_score_n_genes = (ct_1_preformance + ct_2_preformance).idxmax()
+    
+    acc_at_gene_selection_ct_1 = ct_1_heldout_df.loc[ct_1_heldout_df["n_genes_ct_1"] == top_score_n_genes, "accuracy"].mean()
+    acc_at_gene_selection_ct_2 = ct_2_heldout_df.loc[ct_2_heldout_df["n_genes_ct_1"] == top_score_n_genes, "accuracy"].mean()
+    
+    
+    # create final model based on results
+    cell_type_1_markers = marker_objs[cell_type_1].sort_values(ascending=True).iloc[:top_score_n_genes]
+    cell_type_2_markers = marker_objs[cell_type_2].sort_values(ascending=True).iloc[:top_score_n_genes]
+    combined_markers_index = cell_type_1_markers.index.append(cell_type_2_markers.index)
+    combined_markers = np.array(combined_markers_index)
+    ct_1_reference = create_donor_balanced_ref(cell_type_1_objs, cell_per_type)
+    ct_2_reference = create_donor_balanced_ref(cell_type_2_objs, cell_per_type)
+    final_classifier_obj = create_pred_model(cell_type_1, cell_type_2, ct_1_reference, ct_2_reference, combined_markers, classifier_name=classifier_name)
+    
+    save_pairwise_model(cell_type_1, cell_type_2, base_classifier_path, final_classifier_obj, "classifier", order_alphabetically=True)
+
+    meta_obj = {"features_selected": top_score_n_genes, "accuracy_ct_1": acc_at_gene_selection_ct_1, "accuracy_ct_2": acc_at_gene_selection_ct_2, 'n_gene_dist': top_score_n_genes}
+    save_pairwise_model(cell_type_1, cell_type_2, base_classifier_path, meta_obj, "meta", order_alphabetically=True)
 
 
 
@@ -599,3 +903,7 @@ def parse_combined_results_obj(combined_obj):
     pred_df = pd.DataFrame({"cell_type_prediction": cell_type_predictions, "pass_rate": pass_rate}, index=cell_names)
 
     return cellular_results, pred_df
+
+
+
+
