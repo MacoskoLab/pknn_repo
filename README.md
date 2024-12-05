@@ -1,15 +1,31 @@
-# Repo housing code for running and training pKNN Models (Pairwise K Nearest Neighbor)
+# pKNN Model Training and Application
 
-Note: Code here is written around being runnable on Broad's interal compute cluster.
+This repository contains code for running and training pKNN (Pairwise K-Nearest Neighbor) models.
 
+**Note:** This code is specifically designed to be executed on the Broad Institute's internal compute cluster.
 
-The pKNN leverages pairwise differential expression results to make fine grained distinctions between similiar cell types.
+## Overview
 
-The preparation for using this approach consists of 3 steps:
-    1.) Identify pairwise markers
-    2.) Fit pairwise classifiers using these markers and reference
-    3.) Create subsampled reference
+The pKNN approach uses pairwise differential expression results to enable fine-grained distinctions between similar cell types. This method is particularly effective in contexts where traditional classification approaches struggle to resolve subtle cellular differences.
 
+## Workflow
 
-Code for running these steps are in the **create_models** folder and detailed in the **example_training_steps** notebook.
+Using pKNN involves three main steps:
 
+1. **Identify Pairwise Markers**  
+   Determine differential expression markers between each pair of cell types in the dataset.
+
+2. **Fit Pairwise Classifiers**  
+   Train classifiers using the identified markers and reference data to distinguish between each pair of cell types.
+
+3. **Create Subsampled Reference**  
+   Generate a subsampled reference dataset tailored to improve performance and computational efficiency.
+
+## Code Structure
+
+- The **`create_models`** folder contains scripts for executing all three steps of the workflow.
+- Detailed usage examples and step-by-step instructions for training pKNN models are provided in the **`example_training_steps`** Jupyter notebook.
+
+## Getting Started
+
+Refer to the **`example_training_steps`** notebook to see how to prepare input data, train models, and generate the subsampled reference for your specific use case.
