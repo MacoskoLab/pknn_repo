@@ -53,7 +53,6 @@ progress_file = os.path.join(general_working_dir, 'progress.json')
 with open(progress_file) as f:
     progress = json.load(f)
 
-
 # ensure that the previous step is done
 chunked_reference_done = progress['chunk_reference']
 if not chunked_reference_done:
@@ -64,7 +63,6 @@ marker_computation = progress['marker_computation']
 if marker_computation:
     print('marker_computation already done')
     exit(0)
-
 
 
 os.makedirs(markers_reference_out_path, exist_ok=True)

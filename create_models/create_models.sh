@@ -1,7 +1,12 @@
 #!/bin/bash
 
-# Wrapper to run all steps of model creation
+#SBATCH --time=1-24:00:00
+#SBATCH --cpus-per-task=40
+#SBATCH --mem=300G
+#SBATCH --nodes=1
 
+
+# Wrapper to run all steps of model creation
 podman_img_name="synapse_seq_img"
 # take in path to spec file
 spec_file=$1

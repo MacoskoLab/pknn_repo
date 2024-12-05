@@ -9,6 +9,7 @@ import os
 import gc
 import time
 import scipy
+import sys
 
 from sklearn.neighbors import KNeighborsClassifier
 
@@ -112,7 +113,7 @@ def compute_gene_rankings_nonzero(cell_type_1_adata, cell_type_2_adata):
 
 
 
-def compute_and_save_markers_donor_chunked(base_chunked_dir, cell_type_1, cell_type_2, out_dir_base, marker_comp_method="nonzero", valid_markers_set=None, donor_consensus_method="max"):
+def compute_and_save_markers_donor_chunked(base_chunked_dir, cell_type_1, cell_type_2, out_dir_base, marker_comp_method="nonzero", valid_markers_set=None, donor_consensus_method="mean"):
     assert marker_comp_method in ["nonzero"], f"{marker_comp_method} not valid"
     assert donor_consensus_method in ["max", "mean"], f"{donor_consensus_method} not valid"
 
@@ -263,11 +264,11 @@ def read_in_sorted_subfolder_obj( group1, group2, base_path, suffix=None, sort_a
         model = pickle.load(f)
     return model
 
-def get_markers_chunked(cell_type_1, cell_type_2, markers_base, suffix=None):
+def get_markers_chunked(cell_type_1, cell_type_2, markers_base, suffix=None, n_markers_dir=25):
 
     obj = read_in_sorted_subfolder_obj(cell_type_1, cell_type_2, markers_base, suffix=suffix)
-    markers_1 = obj[cell_type_1]
-    markers_2 = obj[cell_type_2]
+    markers_1 = obj[cell_type_1][:n_markers_dir]
+    markers_2 = obj[cell_type_2][:n_markers_dir]
     
     combined_markers_index = markers_1.index.append(markers_2.index)
     # Convert to NumPy array
@@ -284,22 +285,39 @@ def create_classifier_set(inx, current_cell_type, compare_cell_types, chunked_re
         os.makedirs(base_classifier_path, exist_ok=True)
     for cell_type in compare_cell_types:
         model_exists = check_if_model_exists(current_cell_type, cell_type, base_classifier_path, f_name)
+        if model_exists:
+            continue
+        try:
+            create_paired_classifer_test_n_markers(current_cell_type, cell_type, chunked_reference_base, markers_base, base_classifier_path, cell_per_type=cell_per_type, classifier_name=classifier_name)
+        except Exception as e:
+            print("ERROR in create paired classifier set!")
+            print(f"cell type 1: {current_cell_type}")
+            print(f"cell type 2: {cell_type}")
+            print(e)
+            sys.exit(1)
         
+def create_classifier_set_non_donor_split(inx, current_cell_type, compare_cell_types, chunked_reference_base, markers_base, base_classifier_path, n_features_directional=25, cell_per_type=200, equal_size_n=False):
+    
+    f_name="classifier"
+    if inx % 10 == 0:
+        print(f"Working on inx: {inx}")
+    if not os.path.exists(base_classifier_path):
+        os.makedirs(base_classifier_path, exist_ok=True)
+    for cell_type in compare_cell_types:
+        model_exists = check_if_model_exists(current_cell_type, cell_type, base_classifier_path,f_name)
         if model_exists:
             continue
 
-        create_paired_classifer_test_n_markers(current_cell_type, cell_type, chunked_reference_base, markers_base, base_classifier_path, cell_per_type=cell_per_type, classifier_name=classifier_name)
-        
-        # markers = get_markers_chunked(current_cell_type, cell_type, markers_base=markers_base, suffix="markers")                              
-        # classifier = create_classifier_pair(cell_type_1 = current_cell_type, cell_type_2=cell_type, 
-        #                                     chunked_reference_base=chunked_reference_base, 
-        #                                     markers=markers,  cell_per_type=cell_per_type, 
-        #                                     equal_size_n=equal_size_n)
-        
-        # res_obj = {"classifier": classifier, "cell_type1": cell_type, "cell_type2": current_cell_type,  "markers": markers}
+        markers = get_markers_chunked(current_cell_type, cell_type, markers_base, suffix="markers", n_markers_dir=n_features_directional)
 
-        # # save in indexable system
-        # save_pairwise_model(current_cell_type, cell_type, base_classifier_path, res_obj, f_name, order_alphabetically=True)
+        classifier = create_classifier_pair(cell_type_1 = current_cell_type, cell_type_2=cell_type, chunked_reference_base=chunked_reference_base, 
+                                            markers=markers, cell_per_type=cell_per_type, 
+                                            equal_size_n=equal_size_n)
+        res_obj = {"classifier": classifier, "cell_type1": cell_type, "cell_type2": current_cell_type,  "markers": markers}
+
+        save_pairwise_model(current_cell_type, cell_type, base_classifier_path, res_obj, f_name, order_alphabetically=True)
+
+
 
 
 def read_in_donor_chunked_objs(base_chunked_dir, cell_type, valid_markers_set=None, normalize=False):
@@ -423,12 +441,11 @@ def predict_obj_from_classifier_obj(query_obj, query_cell_type, classifier_obj):
 
 
 def create_paired_classifer_test_n_markers(cell_type_1, cell_type_2, chunked_reference_base, markers_base, base_classifier_path, cell_per_type=300, min_markers=5, max_markers=150, n_jump_markers=5, classifier_name="knn"):
-
+    
     print(f"Read in {cell_type_1} objs")
     cell_type_1_objs = read_in_donor_chunked_objs(chunked_reference_base, cell_type_1, normalize=True)
     print(f"Read in {cell_type_2} objs")
     cell_type_2_objs = read_in_donor_chunked_objs(chunked_reference_base, cell_type_2, normalize=True)
-    
     
     marker_objs =  read_in_sorted_subfolder_obj(cell_type_1, cell_type_2, markers_base, suffix="markers")
     
@@ -506,7 +523,6 @@ def create_paired_classifer_test_n_markers(cell_type_1, cell_type_2, chunked_ref
     save_pairwise_model(cell_type_1, cell_type_2, base_classifier_path, meta_obj, "meta", order_alphabetically=True)
 
 
-
 def create_classifier_pair(cell_type_1, cell_type_2, chunked_reference_base, markers, cell_per_type = 200, equal_size_n = False):
     
     cell_type_1_path = os.path.join(chunked_reference_base, f"{cell_type_1}.h5ad")
@@ -522,7 +538,6 @@ def create_classifier_pair(cell_type_1, cell_type_2, chunked_reference_base, mar
     n_cells_cell_type_1 = cell_type_1_adata.shape[0]
     n_cells_cell_type_2 = cell_type_2_adata.shape[0]
 
-
     if equal_size_n:
       min_size = np.min(n_cells_cell_type_1, n_cells_cell_type_2)
       if min_size < cell_per_type:
@@ -536,7 +551,7 @@ def create_classifier_pair(cell_type_1, cell_type_2, chunked_reference_base, mar
           cell_type_1_adata = cell_type_1_adata[np.random.choice(n_cells_cell_type_1, cell_per_type, replace=False), :].copy()
       if n_cells_cell_type_2 > cell_per_type:
           cell_type_2_adata = cell_type_2_adata[np.random.choice(n_cells_cell_type_2, cell_per_type, replace=False), :].copy()
-  
+
     #normalize log both objects
     sc.pp.normalize_total(cell_type_1_adata, target_sum=1e4)
     sc.pp.log1p(cell_type_1_adata)
@@ -552,6 +567,7 @@ def create_classifier_pair(cell_type_1, cell_type_2, chunked_reference_base, mar
     training_data = np.vstack([cell_type_1_mat_markers_only, cell_type_2_mat_markers_only])
     knn_classifer.fit(training_data, reference_labels)
     return knn_classifer
+
 
 
 def check_if_model_exists(group1, group2, base_path, suffix, sort_alphabetically=True):
