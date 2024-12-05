@@ -1,6 +1,6 @@
 # pKNN Model Training and Application
 
-This repository contains code for running and training pKNN (Pairwise K-Nearest Neighbor) models.
+This repository contains code for running and training pKNN (Pairwise K-Nearest Neighbor) models. This is a python based cell type label transfer approach.
 
 **Note:** This code is specifically designed to be executed on the Broad Institute's internal compute cluster.
 
