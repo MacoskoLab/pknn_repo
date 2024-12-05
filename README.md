@@ -25,6 +25,7 @@ Using pKNN involves three main steps:
 
 - The **`create_models`** folder contains scripts for executing all three steps of the workflow.
 - Detailed usage examples and step-by-step instructions for training pKNN models are provided in the **`example_training_steps`** Jupyter notebook.
+- The **run_prediction** folder contains files which use the trained models to predict for a query object.
 
 ## Getting Started
 
